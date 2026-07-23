@@ -222,6 +222,29 @@ write an existing item's field in place, name it with the `ref` field
 (`SECRET = { description = "…", ref = { item = "…", field = "…" } }`); see
 [Secret References](/reference/configuration/#secret-references).
 
+## Devolutions Provider (0.20+)
+
+:::caution[Version compatibility]
+The `devo` provider is planned for SecretSpec 0.20 and is unavailable in 0.19.
+:::
+
+**URIs**: `devo://[context@][VAULT_GUID]` (Server),
+`devo+cloud://[context@][VAULT_GUID]` (Cloud), and
+`devo+sqlite://[VAULT_GUID]?datasource=DATASOURCE_ID` (SQLite)
+
+**Features**: Server read/write; eligible local SQLite `password` read/write;
+Cloud reads; explicit datasource, vault, entry, and field references
+**Prerequisites**: the `devo` CLI and an appropriate saved Server or Cloud
+context, or a configured local RDM workspace. SQLite updates require a Shared
+passphrase v2 credential.
+**Storage**: None. Every secret names an existing entry with
+`ref = { item = "ENTRY_GUID", field = "DATA_PROPERTY" }`; `vault` overrides
+the URI's default vault.
+
+Server and SQLite writes receive secret material only through child-process
+environment variables. Cloud is read-only. See the
+[Devolutions provider guide](/providers/devo/) for source-specific constraints.
+
 ## Keeper Secrets Manager Provider (0.18+)
 
 :::caution[Version compatibility]
@@ -620,6 +643,7 @@ $ export SECRETSPEC_PROVIDER="dotenv:///config/.env"
 | LastPass | ✅ End-to-end | Cloud (LastPass) | ✅ Yes |
 | Dashlane (0.18+) | ✅ End-to-end | Cloud (Dashlane), synced locally | Yes — `dcli` auto-syncs hourly |
 | 1Password | ✅ End-to-end | Cloud (1Password) | ✅ Yes |
+| Devolutions (0.20+) | ✅ Source-managed | Devolutions Server, Cloud, or local RDM SQLite | Server and Cloud; SQLite is local |
 | Keeper (0.18+) | ✅ End-to-end | Cloud (Keeper) | ✅ Yes |
 | GCSM | ✅ Google-managed | Cloud (GCP) | ✅ Yes |
 | AWSSM | ✅ AWS KMS | Cloud (AWS) | ✅ Yes |

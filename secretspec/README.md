@@ -30,6 +30,7 @@ SecretSpec fixes this by separating secret **declaration** from secret **storage
   - [.env](https://secretspec.dev/providers/dotenv)
   - [plaintext files](https://secretspec.dev/providers/file) (0.19+)
   - [1Password](https://secretspec.dev/providers/onepassword)
+  - [Devolutions](https://secretspec.dev/providers/devo) (0.20+)
   - [Keeper Secrets Manager](https://secretspec.dev/providers/keeper) (0.18+)
   - [LastPass](https://secretspec.dev/providers/lastpass)
   - [Dashlane](https://secretspec.dev/providers/dashlane) (0.18+)
@@ -79,6 +80,7 @@ $ secretspec config global init  # 0.17+
 > keyring: Uses system keychain (Recommended)
   kdbx: KeePass KDBX databases (0.17+)
   onepassword: 1Password password manager
+  devo: Devolutions Server, Cloud, and local SQLite (0.20+)
   keeper: Keeper Secrets Manager (0.18+) via official Rust SDK
   dotenv: Traditional .env files
   file: Plaintext files, one per secret (0.19+)

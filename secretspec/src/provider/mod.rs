@@ -19,6 +19,7 @@
 //! - [`kdbx::KdbxProvider`]: KeePass KDBX database integration (0.17+)
 //! - [`keeper::KeeperProvider`]: Keeper Secrets Manager integration (0.18+)
 //! - [`dotenv::DotEnvProvider`]: `.env` file support
+//! - [`devo::DevoProvider`]: Devolutions Server, Cloud, and SQLite integration (0.20+)
 //! - [`env::EnvProvider`]: Environment variables (read-only)
 //! - [`null::NullProvider`]: Defaults, generation, or run prompts without storage (0.19+)
 //! - [`file::FileProvider`]: Plaintext file-per-secret storage (0.19+)
@@ -48,6 +49,9 @@
 //! ```text
 //! keyring://
 //! dotenv://.env.production
+//! devo://context@vault-guid
+//! devo+cloud://context@vault-guid
+//! devo+sqlite://vault-guid?datasource=sqlite:Connections.db
 //! null://  # Use defaults, generation, or run prompts without storage, 0.19+
 //! file:./.secrets  # One plaintext file per secret, 0.19+
 //! onepassword://vault
@@ -287,6 +291,7 @@ pub mod bw;
 #[cfg(feature = "bws")]
 pub mod bws;
 pub mod dashlane;
+pub mod devo;
 pub mod dotenv;
 pub mod env;
 pub mod file;

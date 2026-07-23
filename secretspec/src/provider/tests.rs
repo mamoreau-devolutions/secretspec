@@ -807,6 +807,36 @@ fn test_create_from_string_with_full_uris() {
     // credential or the environment, never from the URI.
     let provider = Box::<dyn Provider>::try_from("onepassword+token://Private").unwrap();
     assert_eq!(provider.name(), "onepassword");
+
+    let provider =
+        Box::<dyn Provider>::try_from("devo://production@e20ad6fb-e991-4f1e-84a0-b12e63832f3a")
+            .unwrap();
+    assert_eq!(provider.name(), "devo");
+
+    let provider = Box::<dyn Provider>::try_from("devo").unwrap();
+    assert_eq!(provider.name(), "devo");
+
+    let provider = Box::<dyn Provider>::try_from(
+        "devo+server://production@e20ad6fb-e991-4f1e-84a0-b12e63832f3a",
+    )
+    .unwrap();
+    assert_eq!(provider.name(), "devo");
+
+    let provider =
+        Box::<dyn Provider>::try_from("devo+cloud://hub@e20ad6fb-e991-4f1e-84a0-b12e63832f3a")
+            .unwrap();
+    assert_eq!(provider.name(), "devo");
+
+    let provider =
+        Box::<dyn Provider>::try_from("devo+hub://hub@e20ad6fb-e991-4f1e-84a0-b12e63832f3a")
+            .unwrap();
+    assert_eq!(provider.name(), "devo");
+
+    let provider = Box::<dyn Provider>::try_from(
+        "devo+sqlite://e20ad6fb-e991-4f1e-84a0-b12e63832f3a?datasource=sqlite%3AConnections.db",
+    )
+    .unwrap();
+    assert_eq!(provider.name(), "devo");
 }
 
 /// A URL password is always a credential, and a URI is the one place a

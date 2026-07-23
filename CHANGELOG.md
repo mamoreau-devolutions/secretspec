@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checksum. The static installer keeps selecting the x86_64 build on Windows
   ARM64, which runs under emulation, so download the archive directly for a
   native binary.
+- Devolutions provider (available in 0.20) for explicit Devolutions Server,
+  Cloud, and local RDM SQLite entry fields through the `devo` CLI. Server
+  supports reads and updates; eligible SQLite workspaces support safe reads and
+  `password` updates with a configured Shared passphrase; and Cloud supports
+  safe reads. Values and passphrases never travel in command-line arguments.
 
 ## [0.19.0] - 2026-08-10
 
