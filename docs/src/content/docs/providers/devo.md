@@ -73,19 +73,22 @@ configuration should use `devo+cloud`.
 For Server, `context` is a saved `devo server` context and is passed as the
 command's optional positional context. Its API-key, credential, OAuth, or
 Windows authentication needs sensitive-field permission to read and entry-edit
-permission to write.
+permission to write. Server uses its direct Devolutions Server connection and
+does not derive its context from RDM workspace or source selection.
 
 For Cloud, `context` is a saved direct `devo cloud` context. Omit it to use the
 current Cloud context. Cloud entries support only the CLI's supported fields:
 `domain`, `host`, `password`, `port`, `privatekey` (or `private-key`), `url`,
-and `username`.
+and `username`. `private_key` and `user` are also accepted aliases.
 
 For SQLite reads, configure an eligible local RDM profile with an existing,
 unprotected SQLite datasource. SecretSpec runs its child command with
-`DEVO_RDM_CLOUD_SOURCE=sqlite`, so an inherited `hub` or `server` selector
-cannot redirect the operation. The standalone reader returns only directly
-serialized, allowlisted fields; a field that requires the RDM runtime to
-decrypt fails closed.
+`DEVO_RDM_CLOUD_SOURCE=sqlite`, which satisfies the standalone CLI's source
+selection requirement and prevents an inherited `hub` or `server` selector
+from redirecting the operation. The standalone reader returns only directly
+serialized `username`, `password`, `domain`, `host`, `port`, `otp`, and
+`privateKey` fields; a field that requires the RDM runtime to decrypt fails
+closed.
 
 ## Configuration
 
@@ -179,6 +182,8 @@ devo sqlite secret get --datasource-id <datasource-id> --vault-id <vault-id> --e
 SQLite reads return exact text on stdout without an added newline. SQLite is
 read-only: `secretspec set` reports `sqliteSecretWriteUnsupported` before
 prompting for a value. The CLI has no `devo sqlite secret set` subcommand.
+The CLI accepts `--workspace-id` as an alias for `--datasource-id`, but
+SecretSpec always passes the canonical datasource ID from the provider URI.
 
 ## Use existing secrets
 
@@ -218,8 +223,8 @@ deployment needs.
 - SQLite is read-only. `sqliteSecretWriteUnsupported` is surfaced before a
   value is read, and `devo sqlite secret set` is not a supported CLI command.
   SQLite reads require an eligible configured unprotected local datasource and
-  return only directly serialized allowlisted fields; runtime-decrypted fields
-  fail closed.
+  return only directly serialized `username`, `password`, `domain`, `host`,
+  `port`, `otp`, and `privateKey` fields; runtime-decrypted fields fail closed.
 - Missing secrets remain eligible for SecretSpec provider fallback chains.
 - Generic `devo secret` and MCP DVLS reference resolution are not supported.
 - Override the CLI path with `SECRETSPEC_DEVO_CLI_PATH` when `devo` is not on
