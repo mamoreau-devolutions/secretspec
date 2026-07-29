@@ -1,5 +1,5 @@
 use crate::config::NativeAddress;
-use crate::provider::{Address, Provider, ProviderUrl};
+use crate::provider::{Address, Provider, ProviderCredentials, ProviderUrl};
 use crate::{Result, SecretSpecError};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
@@ -8,6 +8,9 @@ use std::process::{Command, Output, Stdio};
 const DEVO_CLI_PATH_ENV: &str = "SECRETSPEC_DEVO_CLI_PATH";
 const DEVO_VALUE_ENV: &str = "SECRETSPEC_DEVO_VALUE";
 const DEVO_RDM_CLOUD_SOURCE_ENV: &str = "DEVO_RDM_CLOUD_SOURCE";
+const SQLITE_PASSPHRASE: &str = "passphrase";
+const DEVO_SQLITE_PASSPHRASE_ENV: &str = "DEVO_SQLITE_PASSPHRASE";
+const DEVO_SQLITE_PASSPHRASE_CHILD_ENV: &str = "SECRETSPEC_DEVO_SQLITE_PASSPHRASE";
 
 /// The Devolutions workspace source selected by a Devo provider URI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -156,6 +159,7 @@ struct DevoReference {
 pub struct DevoProvider {
     config: DevoConfig,
     cli_path: String,
+    credentials: ProviderCredentials,
 }
 
 crate::register_provider! {
@@ -169,6 +173,7 @@ crate::register_provider! {
         "devo+cloud://production@vault-guid",
         "devo+sqlite://vault-guid?datasource=sqlite%3AConnections.db",
     ],
+    credential_names: [SQLITE_PASSPHRASE],
 }
 
 impl DevoProvider {
@@ -176,6 +181,7 @@ impl DevoProvider {
         Self {
             config,
             cli_path: std::env::var(DEVO_CLI_PATH_ENV).unwrap_or_else(|_| "devo".to_string()),
+            credentials: ProviderCredentials::new(),
         }
     }
 
@@ -256,6 +262,12 @@ impl DevoProvider {
             reference.field.clone(),
         ]);
         if include_value_env {
+            if self.config.source == DevoSource::Sqlite {
+                args.extend([
+                    "--passphrase-env".to_string(),
+                    DEVO_SQLITE_PASSPHRASE_CHILD_ENV.to_string(),
+                ]);
+            }
             args.extend([
                 "--value-env".to_string(),
                 DEVO_VALUE_ENV.to_string(),
@@ -281,7 +293,12 @@ impl DevoProvider {
         }
     }
 
-    fn execute(&self, args: &[String], value: Option<&SecretString>) -> Result<Output> {
+    fn command(
+        &self,
+        args: &[String],
+        value: Option<&SecretString>,
+        sqlite_passphrase: Option<&SecretString>,
+    ) -> Command {
         let mut command = Command::new(&self.cli_path);
         command
             .args(args)
@@ -290,23 +307,43 @@ impl DevoProvider {
         if let Some((name, value)) = self.source_environment() {
             command.env(name, value);
         }
+        if self.config.source == DevoSource::Sqlite {
+            command
+                .env_remove(DEVO_SQLITE_PASSPHRASE_ENV)
+                .env_remove(DEVO_SQLITE_PASSPHRASE_CHILD_ENV);
+            if let Some(passphrase) = sqlite_passphrase {
+                // The passphrase is scoped to the child and never appears in an
+                // argument or provider diagnostic.
+                command.env(DEVO_SQLITE_PASSPHRASE_CHILD_ENV, passphrase.expose_secret());
+            }
+        }
         if let Some(value) = value {
             // The value is scoped to the child process and never appears in the
             // command line or provider diagnostics.
             command.env(DEVO_VALUE_ENV, value.expose_secret());
         }
+        command
+    }
 
-        command.output().map_err(|error| {
-            if error.kind() == std::io::ErrorKind::NotFound {
-                SecretSpecError::ProviderOperationFailed(
-                    "Devolutions CLI (devo) is not installed. Install devo and configure the \
+    fn execute(
+        &self,
+        args: &[String],
+        value: Option<&SecretString>,
+        sqlite_passphrase: Option<&SecretString>,
+    ) -> Result<Output> {
+        self.command(args, value, sqlite_passphrase)
+            .output()
+            .map_err(|error| {
+                if error.kind() == std::io::ErrorKind::NotFound {
+                    SecretSpecError::ProviderOperationFailed(
+                        "Devolutions CLI (devo) is not installed. Install devo and configure the \
                      selected Devolutions source before using the devo provider."
-                        .to_string(),
-                )
-            } else {
-                error.into()
-            }
-        })
+                            .to_string(),
+                    )
+                } else {
+                    error.into()
+                }
+            })
     }
 
     fn stderr(output: &Output) -> String {
@@ -343,12 +380,39 @@ impl DevoProvider {
         )
     }
 
-    fn sqlite_write_unsupported_error() -> SecretSpecError {
+    fn sqlite_passphrase_configured(&self) -> bool {
+        self.credentials
+            .get(SQLITE_PASSPHRASE)
+            .is_some_and(|passphrase| !passphrase.expose_secret().is_empty())
+            || std::env::var(DEVO_SQLITE_PASSPHRASE_ENV)
+                .is_ok_and(|passphrase| !passphrase.is_empty())
+    }
+
+    fn sqlite_passphrase_required_error() -> SecretSpecError {
         SecretSpecError::ProviderOperationFailed(
-            "sqliteSecretWriteUnsupported: the devo sqlite provider is read-only: the devo CLI \
-             supports only `sqlite secret get`"
+            "sqlitePassphraseRequired: the devo sqlite provider needs a `passphrase` provider \
+             credential or DEVO_SQLITE_PASSPHRASE"
                 .to_string(),
         )
+    }
+
+    fn sqlite_passphrase_from(&self, fallback: Option<String>) -> Result<SecretString> {
+        if let Some(passphrase) = self
+            .credentials
+            .get(SQLITE_PASSPHRASE)
+            .filter(|passphrase| !passphrase.expose_secret().is_empty())
+        {
+            return Ok(passphrase.clone());
+        }
+
+        fallback
+            .filter(|passphrase| !passphrase.is_empty())
+            .map(|passphrase| SecretString::new(passphrase.into()))
+            .ok_or_else(Self::sqlite_passphrase_required_error)
+    }
+
+    fn sqlite_passphrase(&self) -> Result<SecretString> {
+        self.sqlite_passphrase_from(std::env::var(DEVO_SQLITE_PASSPHRASE_ENV).ok())
     }
 
     fn output_value(output: Output) -> Result<SecretString> {
@@ -373,12 +437,23 @@ impl Provider for DevoProvider {
     }
 
     fn check_writable(&self, addr: Address<'_>) -> Result<()> {
+        let reference = self.reference(addr)?;
         match self.config.source {
             DevoSource::Cloud => return Err(Self::cloud_write_unsupported_error()),
-            DevoSource::Sqlite => return Err(Self::sqlite_write_unsupported_error()),
+            DevoSource::Sqlite => {
+                if reference.field != "password" {
+                    return Err(SecretSpecError::ProviderOperationFailed(
+                        "sqliteSecretFieldUnsupported: the devo sqlite provider can update only \
+                         the `password` field"
+                            .to_string(),
+                    ));
+                }
+                if !self.sqlite_passphrase_configured() {
+                    return Err(Self::sqlite_passphrase_required_error());
+                }
+            }
             DevoSource::Server => {}
         }
-        self.reference(addr)?;
         Ok(())
     }
 
@@ -407,7 +482,7 @@ impl Provider for DevoProvider {
     fn get(&self, addr: Address<'_>) -> Result<Option<SecretString>> {
         let reference = self.reference(addr)?;
         let arguments = self.arguments("get", &reference, false)?;
-        let output = self.execute(&arguments, None)?;
+        let output = self.execute(&arguments, None, None)?;
         if !output.status.success() {
             if Self::is_not_found_error(self.config.source, &Self::stderr(&output)) {
                 return Ok(None);
@@ -421,18 +496,27 @@ impl Provider for DevoProvider {
         self.check_writable(addr)?;
         let reference = self.reference(addr)?;
         let arguments = self.arguments("set", &reference, true)?;
-        let output = self.execute(&arguments, Some(value))?;
+        let sqlite_passphrase = (self.config.source == DevoSource::Sqlite)
+            .then(|| self.sqlite_passphrase())
+            .transpose()?;
+        let output = self.execute(&arguments, Some(value), sqlite_passphrase.as_ref())?;
         if output.status.success() {
             Ok(())
         } else {
             Err(self.command_error(&output))
         }
     }
+
+    fn with_credentials(&mut self, credentials: ProviderCredentials) {
+        self.credentials = credentials;
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+    use std::ffi::{OsStr, OsString};
     use url::Url;
 
     fn config(uri: &str) -> DevoConfig {
@@ -508,6 +592,16 @@ mod tests {
         assert_eq!(
             provider.uri(),
             "devo+sqlite://e20ad6fb-e991-4f1e-84a0-b12e63832f3a?datasource=sqlite:Connections.db"
+        );
+    }
+
+    #[test]
+    fn provider_declares_the_sqlite_passphrase_credential() {
+        assert_eq!(
+            crate::provider::credential_names_for_spec(
+                "devo+sqlite://vault-guid?datasource=sqlite%3AConnections.db"
+            ),
+            [SQLITE_PASSPHRASE]
         );
     }
 
@@ -604,6 +698,79 @@ mod tests {
         assert_eq!(
             sqlite.source_environment(),
             Some((DEVO_RDM_CLOUD_SOURCE_ENV, "sqlite"))
+        );
+        assert_eq!(
+            sqlite.arguments("set", &reference, true).unwrap(),
+            [
+                "sqlite",
+                "secret",
+                "set",
+                "--datasource-id",
+                "sqlite:Connections.db",
+                "--vault-id",
+                "vault-guid",
+                "--entry-id",
+                "entry-guid",
+                "--field",
+                "password",
+                "--passphrase-env",
+                DEVO_SQLITE_PASSPHRASE_CHILD_ENV,
+                "--value-env",
+                DEVO_VALUE_ENV,
+                "--yes",
+            ]
+        );
+    }
+
+    #[test]
+    fn sqlite_secrets_are_scoped_to_the_devo_child_environment() {
+        let sqlite = DevoProvider::new(config(
+            "devo+sqlite://vault-guid?datasource=sqlite%3AConnections.db",
+        ));
+        let server = DevoProvider::new(config("devo://vault-guid"));
+        let reference = DevoReference {
+            vault_id: "vault-guid".to_string(),
+            entry_id: "entry-guid".to_string(),
+            field: "password".to_string(),
+        };
+        let replacement = SecretString::new("replacement value".to_string().into());
+        let passphrase = SecretString::new("workspace passphrase".to_string().into());
+        let sqlite_args = sqlite.arguments("set", &reference, true).unwrap();
+        let sqlite_command = sqlite.command(&sqlite_args, Some(&replacement), Some(&passphrase));
+        let sqlite_environment: HashMap<OsString, Option<OsString>> = sqlite_command
+            .get_envs()
+            .map(|(name, value)| (name.to_os_string(), value.map(|value| value.to_os_string())))
+            .collect();
+
+        assert!(matches!(
+            sqlite_environment.get(OsStr::new(DEVO_SQLITE_PASSPHRASE_ENV)),
+            Some(None)
+        ));
+        assert_eq!(
+            sqlite_environment
+                .get(OsStr::new(DEVO_SQLITE_PASSPHRASE_CHILD_ENV))
+                .and_then(|value| value.as_deref()),
+            Some(OsStr::new("workspace passphrase"))
+        );
+        assert_eq!(
+            sqlite_environment
+                .get(OsStr::new(DEVO_VALUE_ENV))
+                .and_then(|value| value.as_deref()),
+            Some(OsStr::new("replacement value"))
+        );
+        assert!(
+            sqlite_command
+                .get_args()
+                .all(|argument| argument != OsStr::new("workspace passphrase")
+                    && argument != OsStr::new("replacement value"))
+        );
+
+        let server_args = server.arguments("set", &reference, true).unwrap();
+        let server_command = server.command(&server_args, Some(&replacement), None);
+        assert!(
+            server_command
+                .get_envs()
+                .all(|(name, _)| name != OsStr::new(DEVO_SQLITE_PASSPHRASE_CHILD_ENV))
         );
     }
 
@@ -711,22 +878,56 @@ mod tests {
     }
 
     #[test]
-    fn sqlite_provider_is_read_only() {
-        let provider = DevoProvider::new(config(
+    fn sqlite_password_writes_require_a_passphrase_credential() {
+        let mut provider = DevoProvider::new(config(
             "devo+sqlite://vault-guid?datasource=sqlite%3AConnections.db",
         ));
-        let address = NativeAddress {
+        let password = NativeAddress {
             item: "entry-guid".to_string(),
             field: Some("password".to_string()),
             ..Default::default()
         };
 
         let error = provider
+            .check_writable(Address::Native(&password))
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("sqlitePassphraseRequired"),
+            "{error}"
+        );
+
+        let mut credentials = ProviderCredentials::new();
+        credentials.insert(
+            SQLITE_PASSPHRASE.to_string(),
+            SecretString::new("workspace passphrase".to_string().into()),
+        );
+        provider.with_credentials(credentials);
+        provider.check_writable(Address::Native(&password)).unwrap();
+        assert_eq!(
+            provider
+                .sqlite_passphrase_from(Some("fallback passphrase".to_string()))
+                .unwrap()
+                .expose_secret(),
+            "workspace passphrase"
+        );
+    }
+
+    #[test]
+    fn sqlite_writes_reject_non_password_fields_before_requesting_a_passphrase() {
+        let provider = DevoProvider::new(config(
+            "devo+sqlite://vault-guid?datasource=sqlite%3AConnections.db",
+        ));
+        let address = NativeAddress {
+            item: "entry-guid".to_string(),
+            field: Some("username".to_string()),
+            ..Default::default()
+        };
+
+        let error = provider
             .check_writable(Address::Native(&address))
             .unwrap_err();
-        assert!(error.to_string().contains("read-only"), "{error}");
         assert!(
-            error.to_string().contains("sqliteSecretWriteUnsupported"),
+            error.to_string().contains("sqliteSecretFieldUnsupported"),
             "{error}"
         );
     }

@@ -4,8 +4,8 @@ description: Devolutions Server, Cloud, and SQLite secret entry integration thro
 ---
 
 The Devolutions provider reads existing secret entry data properties through the
-`devo` CLI. Devolutions Server supports updates; Devolutions Cloud (Hub) and
-local RDM SQLite workspaces are read-only.
+`devo` CLI. Devolutions Server supports updates, and supported local RDM SQLite
+workspaces can update an entry's `password`; Devolutions Cloud (Hub) is read-only.
 
 :::note[Version compatibility]
 The Devolutions provider is an upcoming SecretSpec 0.20 feature and is not
@@ -18,7 +18,7 @@ available in SecretSpec 0.19.
 | --- | --- |
 | Provider | `devo` |
 | Sources | Devolutions Server, Devolutions Cloud (Hub), and local RDM SQLite |
-| Access | Server: read/write; SQLite and Cloud: read-only |
+| Access | Server: read/write; SQLite: `password` read/write; Cloud: read-only |
 | Best for | Existing team or local RDM entry secrets |
 | Authentication | Saved Server or Cloud context, or the selected local RDM workspace |
 | Availability | Upcoming in SecretSpec 0.20 |
@@ -52,7 +52,8 @@ $ secretspec run --profile production -- deploy
 ### Prerequisites
 
 - A `devo` CLI version that includes the `server secret`, `cloud secret`, and
-  `sqlite secret` commands
+  `sqlite secret` commands, including `sqlite secret set` for local password
+  updates
 - A saved Server or Cloud context, or a configured local RDM workspace,
   appropriate to the source in the provider URI
 
@@ -65,7 +66,7 @@ an RDM workspace from the current daemon context.
 | --- | --- | --- | --- |
 | Devolutions Server (DVLS) | `devo://[context@][vault-guid]` or `devo+server://[context@][vault-guid]` | `devo server secret` | Read/write |
 | Devolutions Cloud (Hub) | `devo+cloud://[context@][vault-guid]` | `devo cloud secret` | Read-only |
-| Local RDM SQLite | `devo+sqlite://[vault-guid]?datasource=<datasource-id>` | `devo sqlite secret get` | Read-only |
+| Local RDM SQLite | `devo+sqlite://[vault-guid]?datasource=<datasource-id>` | `devo sqlite secret get` / `set` | `password` only |
 
 `devo+hub` is accepted as a compatibility alias for `devo+cloud`, but new
 configuration should use `devo+cloud`.
@@ -81,14 +82,11 @@ current Cloud context. Cloud entries support only the CLI's supported fields:
 `domain`, `host`, `password`, `port`, `privatekey` (or `private-key`), `url`,
 and `username`. `private_key` and `user` are also accepted aliases.
 
-For SQLite reads, configure an eligible local RDM profile with an existing,
-unprotected SQLite datasource. SecretSpec runs its child command with
+For SQLite, configure an eligible local RDM profile with an existing plaintext
+SQLite datasource. SecretSpec runs its child command with
 `DEVO_RDM_CLOUD_SOURCE=sqlite`, which satisfies the standalone CLI's source
 selection requirement and prevents an inherited `hub` or `server` selector
-from redirecting the operation. The standalone reader returns only directly
-serialized `username`, `password`, `domain`, `host`, `port`, `otp`, and
-`privateKey` fields; a field that requires the RDM runtime to decrypt fails
-closed.
+from redirecting the operation.
 
 ## Configuration
 
@@ -124,6 +122,25 @@ local = "devo+sqlite://e20ad6fb-e991-4f1e-84a0-b12e63832f3a?datasource=sqlite:Co
 [profiles.production]
 API_TOKEN = { description = "Deployment token", ref = { item = "ff676a0a-0b5b-4d31-ae2e-4cc34f56a124", field = "ApiKey" }, providers = ["prod_server"] }
 ```
+
+### SQLite passphrase credential
+
+SQLite password updates require the workspace's Shared passphrase. Prefer an
+alias-scoped `passphrase` [provider credential](/concepts/providers/#provider-credentials)
+so SecretSpec can retrieve it from a secure store:
+
+```toml title="secretspec.toml"
+[providers]
+keyring = "keyring://"
+local = { uri = "devo+sqlite://e20ad6fb-e991-4f1e-84a0-b12e63832f3a?datasource=sqlite:Connections.db", credentials = { passphrase = "keyring" } }
+```
+
+The example reads `passphrase` from keyring at SecretSpec's conventional
+credential address. Use an explicit credential `ref` when it is stored
+elsewhere. For a direct URI or CI setup, `DEVO_SQLITE_PASSPHRASE` is the
+fallback environment variable; an alias credential takes precedence. SecretSpec
+copies the resolved passphrase only to the `devo` child environment and removes
+the fallback variable from that child.
 
 ## Storage model
 
@@ -171,7 +188,7 @@ devo cloud secret get [context] --vault-id <vault-guid> --entry-id <entry-guid> 
 Cloud is read-only: `secretspec set` reports
 `cloudSecretWriteUnsupported` before prompting for a value.
 
-### SQLite reads
+### SQLite reads and password updates
 
 SQLite reads invoke:
 
@@ -179,11 +196,20 @@ SQLite reads invoke:
 devo sqlite secret get --datasource-id <datasource-id> --vault-id <vault-id> --entry-id <entry-id> --field <field>
 ```
 
-SQLite reads return exact text on stdout without an added newline. SQLite is
-read-only: `secretspec set` reports `sqliteSecretWriteUnsupported` before
-prompting for a value. The CLI has no `devo sqlite secret set` subcommand.
-The CLI accepts `--workspace-id` as an alias for `--datasource-id`, but
-SecretSpec always passes the canonical datasource ID from the provider URI.
+SQLite reads return exact text on stdout without an added newline. SQLite
+updates are limited to a native reference whose field is exactly `password`.
+SecretSpec requires a configured passphrase before prompting for a replacement
+value, then invokes:
+
+```text
+devo sqlite secret set --datasource-id <datasource-id> --vault-id <vault-id> --entry-id <entry-id> --field password --passphrase-env <child-passphrase-env> --value-env <child-value-env> --yes
+```
+
+Both secret values are child-only environment variables, never command-line
+arguments or diagnostics. On success, the Devo CLI writes only `Secret:
+updated`; it does not echo either value. The CLI accepts `--workspace-id` as an
+alias for `--datasource-id`, but SecretSpec always passes the canonical
+datasource ID from the provider URI.
 
 ## Use existing secrets
 
@@ -207,8 +233,9 @@ Set up a non-interactive saved context before using a Server or Cloud URI:
 $ secretspec run --profile production --provider "devo+server://ci@e20ad6fb-e991-4f1e-84a0-b12e63832f3a" -- deploy
 ```
 
-SQLite reads in CI require a configured eligible, unprotected local SQLite
-profile. The standalone reader cannot decrypt fields that need the RDM runtime.
+SQLite reads and updates in CI require a configured eligible local SQLite
+profile. Configure the `passphrase` credential through an alias where possible;
+otherwise provide `DEVO_SQLITE_PASSPHRASE` only to the SecretSpec process.
 Grant each source only the vault, entry, and sensitive-field permissions the
 deployment needs.
 
@@ -220,11 +247,18 @@ deployment needs.
   write PAM vault entries. Reads still work with sensitive-field permission.
 - Cloud is read-only. `cloudSecretWriteUnsupported` is surfaced before a value
   is read.
-- SQLite is read-only. `sqliteSecretWriteUnsupported` is surfaced before a
-  value is read, and `devo sqlite secret set` is not a supported CLI command.
-  SQLite reads require an eligible configured unprotected local datasource and
-  return only directly serialized `username`, `password`, `domain`, `host`,
-  `port`, `otp`, and `privateKey` fields; runtime-decrypted fields fail closed.
+- SQLite updates require exactly `ref.field = "password"` and a non-empty
+  `passphrase` provider credential or `DEVO_SQLITE_PASSPHRASE`. SecretSpec
+  returns `sqliteSecretFieldUnsupported` or `sqlitePassphraseRequired` before
+  asking for the replacement value when either requirement is unmet.
+- SQLite mutation is deliberately fail-closed: it supports only a plaintext
+  SQLite format-3 container at database version 155 or later with an exact
+  Shared passphrase v2 payload. Application passwords, unsafe or clear-text
+  mirrors, external credentials, non-profile-root child files, reparse-point
+  or alternate-data-stream ambiguity, and checkout/check-in lifecycle entries
+  are unsupported. The Devo CLI also rejects unavailable runtimes, missing
+  exact datasource/vault/entry IDs, conflicts, and persistence failures rather
+  than bypassing RDM's lifecycle or policy checks.
 - Missing secrets remain eligible for SecretSpec provider fallback chains.
 - Generic `devo secret` and MCP DVLS reference resolution are not supported.
 - Override the CLI path with `SECRETSPEC_DEVO_CLI_PATH` when `devo` is not on
