@@ -83,10 +83,9 @@ current Cloud context. Cloud entries support only the CLI's supported fields:
 and `username`. `private_key` and `user` are also accepted aliases.
 
 For SQLite, configure an eligible local RDM profile with an existing plaintext
-SQLite datasource. SecretSpec runs its child command with
-`DEVO_RDM_CLOUD_SOURCE=sqlite`, which satisfies the standalone CLI's source
-selection requirement and prevents an inherited `hub` or `server` selector
-from redirecting the operation.
+SQLite datasource. The direct `devo sqlite secret` command selects the local
+source itself from its command noun and canonical datasource ID, so an inherited
+generic `DEVO_RDM_SOURCE` selection cannot redirect the operation.
 
 ## Configuration
 

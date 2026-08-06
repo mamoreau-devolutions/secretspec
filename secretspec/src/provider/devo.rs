@@ -7,7 +7,6 @@ use std::process::{Command, Output, Stdio};
 
 const DEVO_CLI_PATH_ENV: &str = "SECRETSPEC_DEVO_CLI_PATH";
 const DEVO_VALUE_ENV: &str = "SECRETSPEC_DEVO_VALUE";
-const DEVO_RDM_CLOUD_SOURCE_ENV: &str = "DEVO_RDM_CLOUD_SOURCE";
 const SQLITE_PASSPHRASE: &str = "passphrase";
 const DEVO_SQLITE_PASSPHRASE_ENV: &str = "DEVO_SQLITE_PASSPHRASE";
 const DEVO_SQLITE_PASSPHRASE_CHILD_ENV: &str = "SECRETSPEC_DEVO_SQLITE_PASSPHRASE";
@@ -277,10 +276,6 @@ impl DevoProvider {
         Ok(args)
     }
 
-    fn source_environment(&self) -> Option<(&'static str, &'static str)> {
-        (self.config.source == DevoSource::Sqlite).then_some((DEVO_RDM_CLOUD_SOURCE_ENV, "sqlite"))
-    }
-
     fn uri_scheme(&self) -> &str {
         if self.config.uri_scheme.is_empty() {
             match self.config.source {
@@ -304,9 +299,6 @@ impl DevoProvider {
             .args(args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        if let Some((name, value)) = self.source_environment() {
-            command.env(name, value);
-        }
         if self.config.source == DevoSource::Sqlite {
             command
                 .env_remove(DEVO_SQLITE_PASSPHRASE_ENV)
@@ -696,10 +688,6 @@ mod tests {
             ]
         );
         assert_eq!(
-            sqlite.source_environment(),
-            Some((DEVO_RDM_CLOUD_SOURCE_ENV, "sqlite"))
-        );
-        assert_eq!(
             sqlite.arguments("set", &reference, true).unwrap(),
             [
                 "sqlite",
@@ -757,6 +745,10 @@ mod tests {
                 .get(OsStr::new(DEVO_VALUE_ENV))
                 .and_then(|value| value.as_deref()),
             Some(OsStr::new("replacement value"))
+        );
+        assert!(
+            !sqlite_environment.contains_key(OsStr::new("DEVO_RDM_SOURCE"))
+                && !sqlite_environment.contains_key(OsStr::new("DEVO_RDM_CLOUD_SOURCE"))
         );
         assert!(
             sqlite_command
