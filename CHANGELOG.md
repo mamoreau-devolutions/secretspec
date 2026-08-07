@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Windows ARM64 CLI release artifacts (`aarch64-pc-windows-msvc`), built natively
+  on GitHub's `windows-11-arm` runners alongside the existing Windows x64 build.
 - C# SDK (`Cachix.SecretSpec`, available in 0.16): resolve secrets from .NET
   through the shared native resolver, with fluent builder and one-shot APIs,
   typed failure exceptions, value-free preflight reports, provenance,
