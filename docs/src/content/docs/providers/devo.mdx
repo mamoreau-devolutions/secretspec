@@ -3,6 +3,8 @@ title: Devolutions Provider
 description: Devolutions Server, Cloud, and SQLite secret entry integration through the devo CLI
 ---
 
+import ProviderCredentials from '../../../components/ProviderCredentials.astro';
+
 The Devolutions provider reads existing secret entry data properties through the
 `devo` CLI. Devolutions Server supports updates, and supported local RDM SQLite
 workspaces can update an entry's `password`; Devolutions Cloud (Hub) is read-only.
@@ -122,10 +124,14 @@ local = "devo+sqlite://e20ad6fb-e991-4f1e-84a0-b12e63832f3a?datasource=sqlite:Co
 API_TOKEN = { description = "Deployment token", ref = { item = "ff676a0a-0b5b-4d31-ae2e-4cc34f56a124", field = "ApiKey" }, providers = ["prod_server"] }
 ```
 
+## Provider credentials
+
+<ProviderCredentials provider="devo" />
+
 ### SQLite passphrase credential
 
 SQLite password updates require the workspace's Shared passphrase. Prefer an
-alias-scoped `passphrase` [provider credential](/concepts/providers/#provider-credentials)
+alias-scoped `passphrase` [provider credential](/reference/provider-credentials/)
 so SecretSpec can retrieve it from a secure store:
 
 ```toml title="secretspec.toml"
