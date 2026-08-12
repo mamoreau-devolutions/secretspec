@@ -358,10 +358,20 @@ impl DevoProvider {
     }
 
     fn is_not_found_error(source: DevoSource, stderr: &str) -> bool {
-        stderr
-            .trim()
-            .split_once(':')
-            .is_some_and(|(code, _)| code.trim() == source.not_found_error_code())
+        let Some((code, _)) = stderr.trim().split_once(':') else {
+            return false;
+        };
+
+        match source {
+            DevoSource::Sqlite => matches!(
+                code.trim(),
+                "sqliteSecretNotFound"
+                    | "sqliteMutationDatasourceNotFound"
+                    | "sqliteMutationVaultNotFound"
+                    | "sqliteMutationEntryNotFound"
+            ),
+            DevoSource::Server | DevoSource::Cloud => code.trim() == source.not_found_error_code(),
+        }
     }
 
     fn cloud_write_unsupported_error() -> SecretSpecError {
@@ -852,6 +862,19 @@ mod tests {
             DevoSource::Sqlite,
             "sqliteSecretNotFound: The requested vault, entry, or secret field was not found."
         ));
+        for code in [
+            "sqliteMutationDatasourceNotFound",
+            "sqliteMutationVaultNotFound",
+            "sqliteMutationEntryNotFound",
+        ] {
+            assert!(
+                DevoProvider::is_not_found_error(
+                    DevoSource::Sqlite,
+                    &format!("{code}: The requested SQLite resource was not found.")
+                ),
+                "{code} should be a provider miss"
+            );
+        }
     }
 
     #[test]
